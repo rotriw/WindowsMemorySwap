@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <stdio.h>
 
 typedef enum{
     SystemBasicInformation, // q: SYSTEM_BASIC_INFORMATION
@@ -254,36 +253,52 @@ typedef enum{
     MemoryCommandMax
 }SYSTEM_MEMORY_LIST_COMMAND;
 
-NTSYSCALLAPI NTSTATUS NTAPI NtSetSystemInformation(
+NTSYSAPI NTAPI NTSTATUS NtSetSystemInformation(
     SYSTEM_INFORMATION_CLASS SystemInformationClass,
     PVOID SystemInformation,
     ULONG SystemInformationLength
 );
 
-void Message(NTSTATUS i,NTSTATUS r){
-    LPSTR lpMsgBuf;
-    FormatMessageA(
+NTSYSAPI NTAPI ULONG RtlNtStatusToDosError(NTSTATUS Status);
+
+void Message(LONG i,ULONG r){
+    LPSTR error,message;
+    DWORD temp=FormatMessageA(
         FORMAT_MESSAGE_ALLOCATE_BUFFER|FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_IGNORE_INSERTS,
         0,r,0,
-        (LPSTR)&lpMsgBuf,
+        (LPSTR)&error,
         0,0
     );
-    char msg[1024];
+    if(temp==0)return;
+
+    DWORD_PTR args[]={(DWORD_PTR)i,(DWORD_PTR)r,(DWORD_PTR)error};
+    temp=FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER|FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
+        "step %1!d! return 0x%2!x! message %3!s!\n%0",
+        0,0,
+        (LPSTR)&message,
+        0,(va_list*)args
+    );
+    if(temp==0)return;
+
     WriteFile(
         GetStdHandle(STD_OUTPUT_HANDLE),
-        msg,
-        wsprintfA(msg,"step %d return 0x%x message %s\n",i,r,lpMsgBuf),
+        message,
+        temp,
         0,0
     );
 }
 
 void Main(void){
+    SetLastError(0);
+
     HANDLE CurrentProcessToken;
-    if(OpenProcessToken(
+    OpenProcessToken(
         GetCurrentProcess(),
         MAXIMUM_ALLOWED,
         &CurrentProcessToken
-    )==0)Message(-1,GetLastError());
+    );
+    Message(-1,GetLastError());
 
     struct{
         DWORD PrivilegeCount;
@@ -291,11 +306,12 @@ void Main(void){
     }NewPrivilege;
     NewPrivilege.PrivilegeCount=1;
     NewPrivilege.Privileges.Attributes = SE_PRIVILEGE_ENABLED;
-    if(LookupPrivilegeValueA(
+    LookupPrivilegeValueA(
         0,
         "SeProfileSingleProcessPrivilege",
         &NewPrivilege.Privileges.Luid
-    )==0)Message(-2,GetLastError());
+    );
+    Message(-2,GetLastError());
 
     AdjustTokenPrivileges(
         CurrentProcessToken,
@@ -316,17 +332,13 @@ void Main(void){
         //MemoryPurgeStandbyList
         4
     };
-    NTSTATUS i=0;
-    for(;i<3;i++){
-        Message(
-            i,
-            NtSetSystemInformation(
-                //SystemMemoryListInformation
-                80,
-                &(CommandList[i]),
-                sizeof(SYSTEM_MEMORY_LIST_COMMAND)
-            )
-        );
-    }
-    CloseHandle(CurrentProcessToken);
+    for(LONG i=0;i<3;i++)Message(
+        i,
+        RtlNtStatusToDosError(NtSetSystemInformation(
+            //SystemMemoryListInformation
+            80,
+            &(CommandList[i]),
+            sizeof(SYSTEM_MEMORY_LIST_COMMAND)
+        ))
+    );
 }
