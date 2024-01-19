@@ -261,6 +261,17 @@ NTSYSAPI NTAPI NTSTATUS NtSetSystemInformation(
 
 NTSYSAPI NTAPI ULONG RtlNtStatusToDosError(NTSTATUS Status);
 
+void Print(LPSTR msg,DWORD len){
+    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),msg,len,0,0);
+}
+
+void PrintCS(LPSTR msg){
+    DWORD len=0;
+    while(msg[len])
+        len++;
+    Print(msg,len);
+}
+
 void Message(LONG i,ULONG r){
     LPSTR error,message;
     DWORD temp=FormatMessageA(
@@ -281,24 +292,22 @@ void Message(LONG i,ULONG r){
     );
     if(temp==0)return;
 
-    WriteFile(
-        GetStdHandle(STD_OUTPUT_HANDLE),
-        message,
-        temp,
-        0,0
-    );
+    Print(message,temp);
 }
 
 void Main(void){
-    SetLastError(0);
+    LPSTR endmsg="(error)";
+    BOOL temp;
+    SetLastError(ERROR_SUCCESS);
 
     HANDLE CurrentProcessToken;
-    OpenProcessToken(
+    temp=OpenProcessToken(
         GetCurrentProcess(),
         MAXIMUM_ALLOWED,
         &CurrentProcessToken
     );
     Message(-1,GetLastError());
+    if(temp==0)goto exit;
 
     struct{
         DWORD PrivilegeCount;
@@ -306,14 +315,15 @@ void Main(void){
     }NewPrivilege;
     NewPrivilege.PrivilegeCount=1;
     NewPrivilege.Privileges.Attributes = SE_PRIVILEGE_ENABLED;
-    LookupPrivilegeValueA(
+    temp=LookupPrivilegeValueA(
         0,
         "SeProfileSingleProcessPrivilege",
         &NewPrivilege.Privileges.Luid
     );
     Message(-2,GetLastError());
+    if(temp==0)goto exit;
 
-    AdjustTokenPrivileges(
+    temp=AdjustTokenPrivileges(
         CurrentProcessToken,
         0,
         (PTOKEN_PRIVILEGES)&NewPrivilege,
@@ -323,6 +333,7 @@ void Main(void){
         0
     );
     Message(-3,GetLastError());
+    if(temp==0)goto exit;
 
     SYSTEM_MEMORY_LIST_COMMAND CommandList[]={
         //MemoryEmptyWorkingSets
@@ -341,4 +352,9 @@ void Main(void){
             sizeof(SYSTEM_MEMORY_LIST_COMMAND)
         ))
     );
+    endmsg="(finish)";
+    exit:
+    PrintCS(endmsg);
+    PrintCS("\nnow can close this program");
+    SuspendThread(GetCurrentThread());
 }
